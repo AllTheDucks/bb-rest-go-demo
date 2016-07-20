@@ -1,25 +1,49 @@
 package main
 
-import "fmt"
-import "io"
 import "golang.org/x/oauth2"
 import "golang.org/x/oauth2/clientcredentials"
 import "log"
+import "flag"
 import "os"
+import "net/http"
+import "encoding/json"
+import "fmt"
 
+var serverRoot string
+var appKey string
+var appSecret string
+var tokenUrl string
+var usersUrl string
+var coursesUrl string
 
+func init() {
+	flag.StringVar(&serverRoot, "serverRoot", "", "The base URL of the Bb Learn server. e.g. https://mybb.inst.edu.au")
+	flag.StringVar(&appKey, "appKey", "", "The Application Key")
+	flag.StringVar(&appSecret, "appSecret", "", "The Application Secret")
+
+	flag.Parse()
+
+	if serverRoot == "" || appKey == "" || appSecret == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	tokenUrl = serverRoot + "/learn/api/public/v1/oauth2/token"
+	usersUrl = serverRoot + "/learn/api/public/v1/users"
+	coursesUrl = serverRoot + "/learn/api/public/v1/courses"
+
+}
 
 func main() {
-	fmt.Printf("Starting Application...\n")
 
 	/*
 	 * setup the clientcredentials Configuration data
 	 */
 	conf := &clientcredentials.Config{
-	    ClientID:     "---- Application Key goes Here ----",
-	    ClientSecret: "---- Application Secret goes Here ----",
-	    Scopes:       []string{},
-	    TokenURL: "---- Your Bb server Root --- /learn/api/public/v1/oauth2/token",
+		ClientID:     appKey,
+		ClientSecret: appSecret,
+		Scopes:       []string{},
+		TokenURL:     tokenUrl,
 	}
 
 	/*
@@ -27,15 +51,51 @@ func main() {
 	 */
 	client := conf.Client(oauth2.NoContext)
 
-	/*
-	 * Make a request to the API
-	 */
-	resp, err := client.Get("http://localhost:9876/learn/api/public/v1/users")
+
+	courseService := CourseService{Client: *client}
+	courses, err := courseService.getCourses()
+
 	if err != nil {
-	    log.Fatal(err)
+		log.Fatal(err)
 	}
 
-	io.Copy(os.Stdout, resp.Body)
+	fmt.Printf("Id, ExternalId, CourseId, Name\n")
+	for _, c := range courses.Courses {
+		// This assumes a lot.  Really should be escaping all these strings.
+		fmt.Printf("\"%s\",\"%s\",\"%s\",\"%s\"\n", c.Id, c.ExternalId, c.CourseId, c.Name)
+	}
 
 }
 
+
+type CoursesResult struct {
+	Courses []Course `json:"results"`
+	Paging Paging `json:"paging"`
+}
+
+type Paging struct {
+	NextPage string `json:"nextPage"`
+}
+
+type Course struct {
+	Id string `json:"id"`
+	Uuid string `json:"uuid"`
+	ExternalId string `json:"externalId"`
+	DataSourceId string `json:"dataSourceId"`
+	CourseId string `json:"courseId"`
+	Name string `json:"name"`
+}
+
+type CourseService struct {
+	Client http.Client
+}
+
+func (svc CourseService) getCourses() (coursesResult CoursesResult, err error) {
+
+	resp, err := svc.Client.Get(coursesUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&coursesResult)
+	return
+}
