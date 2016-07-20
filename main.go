@@ -16,6 +16,9 @@ var tokenUrl string
 var usersUrl string
 var coursesUrl string
 
+var client *http.Client
+var courseService CourseService
+
 func init() {
 	flag.StringVar(&serverRoot, "serverRoot", "", "The base URL of the Bb Learn server. e.g. https://mybb.inst.edu.au")
 	flag.StringVar(&appKey, "appKey", "", "The Application Key")
@@ -49,23 +52,32 @@ func main() {
 	/*
 	 * Get a client based on the configuration
 	 */
-	client := conf.Client(oauth2.NoContext)
+	client = conf.Client(oauth2.NoContext)
+
+	courseService = CourseService{Client: *client}
+
+	http.HandleFunc("/", courseListHandler)
+	http.ListenAndServe(":8080", nil)
+
+}
 
 
-	courseService := CourseService{Client: *client}
+func courseListHandler(w http.ResponseWriter, r *http.Request) {
 	courses, err := courseService.getCourses()
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	fmt.Printf("Id, ExternalId, CourseId, Name\n")
+	w.Header()["Content-Type"] = []string{"text/csv"}
+	w.Header()["Content-Disposition"] = []string{"attachment; filename=\"courselist.csv\""}
+	fmt.Fprintf(w, "Id, ExternalId, CourseId, Name\n")
 	for _, c := range courses.Courses {
 		// This assumes a lot.  Really should be escaping all these strings.
-		fmt.Printf("\"%s\",\"%s\",\"%s\",\"%s\"\n", c.Id, c.ExternalId, c.CourseId, c.Name)
+		fmt.Fprintf(w, "\"%s\",\"%s\",\"%s\",\"%s\"\n", c.Id, c.ExternalId, c.CourseId, c.Name)
 	}
 
 }
+
 
 
 type CoursesResult struct {
