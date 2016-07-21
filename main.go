@@ -7,7 +7,9 @@ import "flag"
 import "os"
 import "net/http"
 import "encoding/json"
+import "html/template"
 import "fmt"
+import "time"
 
 var serverRoot string
 var appKey string
@@ -57,10 +59,10 @@ func main() {
 	courseService = CourseService{Client: *client}
 
 	http.HandleFunc("/", courseListHandler)
+	http.HandleFunc("/getenrolments", getCourseUsersHandler)
 	http.ListenAndServe(":8080", nil)
 
 }
-
 
 func courseListHandler(w http.ResponseWriter, r *http.Request) {
 	courses, err := courseService.getCourses()
@@ -68,21 +70,39 @@ func courseListHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	t, _ := template.ParseFiles("courselist.html")
+	t.Execute(w, courses)
+
+}
+
+func getCourseUsersHandler(w http.ResponseWriter, r *http.Request) {
+
+	courseId := r.URL.Query().Get("course_id")
+	result, err := courseService.getCourseUsers(courseId)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 	w.Header()["Content-Type"] = []string{"text/csv"}
-	w.Header()["Content-Disposition"] = []string{"attachment; filename=\"courselist.csv\""}
-	fmt.Fprintf(w, "Id, ExternalId, CourseId, Name\n")
-	for _, c := range courses.Courses {
+	w.Header()["Content-Disposition"] = []string{"attachment; filename=\"enrollment-list-" +
+		courseId + ".csv\""}
+	fmt.Fprintf(w, "user_id, course_id, role, created\n")
+	for _, c := range result.CourseUsers {
 		// This assumes a lot.  Really should be escaping all these strings.
-		fmt.Fprintf(w, "\"%s\",\"%s\",\"%s\",\"%s\"\n", c.Id, c.ExternalId, c.CourseId, c.Name)
+		fmt.Fprintf(w, "\"%s\",\"%s\",\"%s\",\"%s\"\n", c.UserId, c.CourseId, c.Role, c.CreatedDateTime)
 	}
 
 }
 
-
-
 type CoursesResult struct {
 	Courses []Course `json:"results"`
-	Paging Paging `json:"paging"`
+	Paging  Paging   `json:"paging"`
+}
+
+type CourseUsersResult struct {
+	CourseUsers []CourseUser `json:"results"`
+	Paging      Paging       `json:"paging"`
 }
 
 type Paging struct {
@@ -90,24 +110,46 @@ type Paging struct {
 }
 
 type Course struct {
-	Id string `json:"id"`
-	Uuid string `json:"uuid"`
-	ExternalId string `json:"externalId"`
+	Id           string `json:"id"`
+	Uuid         string `json:"uuid"`
+	ExternalId   string `json:"externalId"`
 	DataSourceId string `json:"dataSourceId"`
-	CourseId string `json:"courseId"`
-	Name string `json:"name"`
+	CourseId     string `json:"courseId"`
+	Name         string `json:"name"`
+}
+
+type CourseUser struct {
+	UserId          string       `json:"userId"`
+	CourseId        string       `json:"courseId"`
+	DataSourceId    string       `json:"dataSourceId"`
+	CreatedDateTime time.Time    `json:"created"` // "2016-07-21T00:51:57.176Z"
+	Availability    Availability `json:"availability"`
+	Role            string       `json:"courseRoleId"`
+}
+
+type Availability struct {
+	Available string `json:"available"`
 }
 
 type CourseService struct {
 	Client http.Client
 }
 
-func (svc CourseService) getCourses() (coursesResult CoursesResult, err error) {
+func (svc CourseService) getCourses() (result CoursesResult, err error) {
 
 	resp, err := svc.Client.Get(coursesUrl)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = json.NewDecoder(resp.Body).Decode(&coursesResult)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	return
+}
+
+func (svc CourseService) getCourseUsers(courseId string) (result CourseUsersResult, err error) {
+	resp, err := svc.Client.Get(coursesUrl + "/" + courseId + "/users")
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
 	return
 }
